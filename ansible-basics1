@@ -1,0 +1,6 @@
+ssh-agent bash
+ssh-add <key path>
+ansible all -m ping
+ansible all -a "/bin/echo hello"
+ansible all -a "sudo sed -i 's/192.168.0.2/8.8.8.8/g' /etc/resolv.conf"
+ansible all -a "sudo apt-get update"
