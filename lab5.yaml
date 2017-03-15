@@ -1,0 +1,190 @@
+heat_template_version: 2016-04-08
+
+description: Template for the fifth lab
+
+parameters:
+
+  app_port:
+    type: number
+    default: 80
+    description: Port used by the servers
+
+  instance_flavor:
+    type: string
+    label: Instance Flavor
+    description: Instance flavor to be used.
+    constraints:
+      - allowed_values:
+        - m1.tiny
+    default: m1.tiny
+
+  instance_image:
+    type: string
+    label: Instance Image
+    description: Instance image to be used.
+    default: cirros
+
+  external_network:
+    type: string
+    description: The uuid of the external (public) network
+    default: public
+
+resources:
+
+  private_network:
+    type: OS::Neutron::Net
+    properties:
+      name: private
+
+  private_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: private-subnet
+      network_id: { get_resource: private_network }
+      cidr: 10.10.0.0/28
+      dns_nameservers:
+        - 8.8.8.8
+
+  my_security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: my_security_group
+      rules:
+        - protocol: tcp
+          port_range_min: 80
+          port_range_max: 80
+        - protocol: tcp
+          port_range_min: 443
+          port_range_max: 443
+        - protocol: icmp
+        - protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+
+  router:
+    type: OS::Neutron::Router
+    properties:
+      external_gateway_info:
+        network: { get_param: external_network }
+
+  router-interface:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: router }
+      subnet: { get_resource: private_subnet }
+
+  my_instance:
+    type: OS::Nova::Server
+    depends_on: private_subnet
+    properties:
+      flavor: { get_param: instance_flavor }
+      image: { get_param: instance_image }
+      security_groups:
+        - { get_resource: my_security_group }
+#      networks: [ { "fixed_ip": 10.10.0.7 , "network": { get_resource: private_network } } ]
+      networks: [{ network: { get_resource: private_network }}]
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          template: |
+            #!/bin/sh
+            cat >> /etc/rc.local << EOF
+            #!/bin/sh
+            sudo -b /bin/httpd
+            sleep 1
+            echo `date` >> /root/date
+            echo "started" >> /root/date
+            EOF
+            cat >> /bin/httpd << EOF
+            #!/bin/sh
+            while true; do nohup echo -e "HTTP/1.0 200 OK\r\nContent-Length: 8\r\n\r\n_SERVER_name\r\n\r\n" | sudo nc -l -p 80 ; done
+            EOF
+            chmod 755 /etc/rc.local
+            chmod 755 /bin/httpd
+          params:
+            _SERVER_name: server01
+
+  my_instance1:
+    type: OS::Nova::Server
+    depends_on: private_subnet
+    properties:
+      flavor: { get_param: instance_flavor }
+      image: { get_param: instance_image }
+      security_groups:
+        - { get_resource: my_security_group }
+      networks: [{ network: { get_resource: private_network }}]
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          template: |
+            #!/bin/sh
+            cat >> /etc/rc.local << EOF
+            #!/bin/sh
+            sudo -b /bin/httpd
+            sleep 1
+            echo `date` >> /root/date
+            echo "started" >> /root/date
+            EOF
+            cat >> /bin/httpd << EOF
+            #!/bin/sh
+            while true; do nohup echo -e "HTTP/1.0 200 OK\r\nContent-Length: 8\r\n\r\n_SERVER_name\r\n\r\n" | sudo nc -l -p 80 ; done
+            EOF
+            chmod 755 /etc/rc.local
+            chmod 755 /bin/httpd
+          params:
+            _SERVER_name: server02
+
+  pool_member1:
+    type: OS::Neutron::LBaaS::PoolMember
+    properties:
+      pool: { get_resource: pool }
+      address: { get_attr: [ my_instance, networks, private, 0 ]}
+      protocol_port: { get_param: app_port }
+      subnet: { get_resource: private_subnet }
+
+  pool_member2:
+    type: OS::Neutron::LBaaS::PoolMember
+    properties:
+      pool: { get_resource: pool }
+      address: { get_attr: [ my_instance1, networks, private, 0 ]}
+      protocol_port: { get_param: app_port }
+      subnet: { get_resource: private_subnet }
+
+  monitor:
+    type: OS::Neutron::LBaaS::HealthMonitor
+    properties:
+      delay: 3
+      type: HTTP
+      timeout: 3
+      max_retries: 3
+      pool: { get_resource: pool }
+
+  pool:
+    type: OS::Neutron::LBaaS::Pool
+    properties:
+      lb_algorithm: ROUND_ROBIN
+      protocol: HTTP
+      listener: { get_resource: listener }
+
+  listener:
+    type: OS::Neutron::LBaaS::Listener
+    properties:
+      loadbalancer: { get_resource: loadbalancer }
+      protocol: HTTP
+      protocol_port: { get_param: app_port }
+
+  loadbalancer:
+    type: OS::Neutron::LBaaS::LoadBalancer
+    properties:
+      vip_subnet: { get_resource: private_subnet }
+
+
+outputs:
+
+  Loadbalancer_vip:
+    description: The IP address of the load balancer
+    value:
+      str_replace:
+        template:  http://%vip%
+        params:
+          "%vip%": { get_attr: [ loadbalancer, vip_address ] }
