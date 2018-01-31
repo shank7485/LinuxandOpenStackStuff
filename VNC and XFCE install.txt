@@ -1,0 +1,14 @@
+sudo apt-get update
+sudo apt-get install xfce4 xfce4-goodies tightvncserver
+sudo su
+vncserver # set password
+vncserver -kill :1
+cat > ~/.vnc/xstartup << EOF
+#!/bin/bash
+xrdb $HOME/.Xresources
+startxfce4 &
+EOF
+chmod +x ~/.vnc/xstartup
+
+# Start
+vncserver -geometry 1920x1080
